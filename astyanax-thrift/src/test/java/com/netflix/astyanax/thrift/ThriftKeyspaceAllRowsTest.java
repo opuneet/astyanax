@@ -1,51 +1,41 @@
 package com.netflix.astyanax.thrift;
 
-import com.google.common.collect.ImmutableMap;
-import com.netflix.astyanax.AstyanaxContext;
-import com.netflix.astyanax.ExceptionCallback;
-import com.netflix.astyanax.Keyspace;
-import com.netflix.astyanax.MutationBatch;
-import com.netflix.astyanax.RowCallback;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
-import com.netflix.astyanax.connectionpool.OperationResult;
-import com.netflix.astyanax.connectionpool.exceptions.ConnectionException;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
-import com.netflix.astyanax.ddl.KeyspaceDefinition;
-import com.netflix.astyanax.impl.AstyanaxCheckpointManager;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
-import com.netflix.astyanax.model.ColumnFamily;
-import com.netflix.astyanax.model.Row;
-import com.netflix.astyanax.model.Rows;
-import com.netflix.astyanax.query.CheckpointManager;
-import com.netflix.astyanax.serializers.LongSerializer;
-import com.netflix.astyanax.serializers.StringSerializer;
-import com.netflix.astyanax.util.RangeBuilder;
-import com.netflix.astyanax.util.SingletonEmbeddedCassandra;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
+
 import junit.framework.Assert;
+
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Iterator;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.atomic.AtomicLong;
+import com.netflix.astyanax.ExceptionCallback;
+import com.netflix.astyanax.Keyspace;
+import com.netflix.astyanax.MutationBatch;
+import com.netflix.astyanax.RowCallback;
+import com.netflix.astyanax.connectionpool.OperationResult;
+import com.netflix.astyanax.connectionpool.exceptions.ConnectionException;
+import com.netflix.astyanax.ddl.KeyspaceDefinition;
+import com.netflix.astyanax.impl.AstyanaxCheckpointManager;
+import com.netflix.astyanax.model.ColumnFamily;
+import com.netflix.astyanax.model.Row;
+import com.netflix.astyanax.model.Rows;
+import com.netflix.astyanax.query.CheckpointManager;
+import com.netflix.astyanax.serializers.LongSerializer;
+import com.netflix.astyanax.serializers.StringSerializer;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
+import com.netflix.astyanax.util.RangeBuilder;
 
 public class ThriftKeyspaceAllRowsTest {
     
     private static Logger LOG = LoggerFactory.getLogger(ThriftKeyspaceAllRowsTest.class);
 
     private static Keyspace                  keyspace;
-    private static AstyanaxContext<Keyspace> keyspaceContext;
 
-    private static String TEST_CLUSTER_NAME  = "cass_sandbox";
-    private static String TEST_KEYSPACE_NAME = "AstyanaxUnitTests";
-    private static final String SEEDS = "localhost:9160";
-    private static final long   CASSANDRA_WAIT_TIME = 3000;
     private static final long   LOTS_OF_ROWS_COUNT = 1000;
     
     public static ColumnFamily<Long, String> CF_ALL_ROWS = 
@@ -58,74 +48,31 @@ public class ThriftKeyspaceAllRowsTest {
             new ColumnFamily<Long, String>("LotsOfRows1",       LongSerializer.get(), StringSerializer.get());
 
     public static ColumnFamily<Long, String> CF_CHECKPOINTS = 
-            new ColumnFamily<Long, String>("Checkpoints",       LongSerializer.get(), StringSerializer.get());
+            new ColumnFamily<Long, String>("Checkpoints1",       LongSerializer.get(), StringSerializer.get());
 
     @BeforeClass
     public static void setup() throws Exception {
         System.out.println("TESTING THRIFT KEYSPACE");
 
-        SingletonEmbeddedCassandra.getInstance();
-        
-        Thread.sleep(CASSANDRA_WAIT_TIME);
-        
+        CassandraTestServerProxy.getInstance().startCassServer();
         createKeyspace();
     }
 
     @AfterClass
     public static void teardown() throws Exception {
-        if (keyspaceContext != null)
-            keyspaceContext.shutdown();
-        
-        Thread.sleep(CASSANDRA_WAIT_TIME);
     }
 
     public static void createKeyspace() throws Exception {
-        keyspaceContext = new AstyanaxContext.Builder()
-                .forCluster(TEST_CLUSTER_NAME)
-                .forKeyspace(TEST_KEYSPACE_NAME)
-                .withAstyanaxConfiguration(
-                        new AstyanaxConfigurationImpl()
-                                .setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE)
-                                .setConnectionPoolType(ConnectionPoolType.TOKEN_AWARE)
-                                .setDiscoveryDelayInSeconds(60000))
-                .withConnectionPoolConfiguration(
-                        new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-                                + "_" + TEST_KEYSPACE_NAME)
-                                .setSocketTimeout(30000)
-                                .setMaxTimeoutWhenExhausted(2000)
-                                .setMaxConnsPerHost(20)
-                                .setInitConnsPerHost(10)
-                                .setSeeds(SEEDS)
-                                )
-                .withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-                .buildKeyspace(ThriftFamilyFactory.getInstance());
 
-        keyspaceContext.start();
-        
-        keyspace = keyspaceContext.getEntity();
-        
-        try {
-            keyspace.dropKeyspace();
-        }
-        catch (Exception e) {
-            LOG.info(e.getMessage());
-        }
-        
-        keyspace.createKeyspace(ImmutableMap.<String, Object>builder()
-                .put("strategy_options", ImmutableMap.<String, Object>builder()
-                        .put("replication_factor", "1")
-                        .build())
-                .put("strategy_class",     "SimpleStrategy")
-                .build()
-                );
-        
+        keyspace = CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
+
        
         keyspace.createColumnFamily(CF_ALL_ROWS,            null);
         keyspace.createColumnFamily(CF_ALL_ROWS_TOMBSTONE,  null);
         keyspace.createColumnFamily(CF_LOTS_OF_ROWS,        null);
         keyspace.createColumnFamily(CF_CHECKPOINTS,         null);
         
-        KeyspaceDefinition ki = keyspaceContext.getEntity().describeKeyspace();
+        KeyspaceDefinition ki = keyspace.describeKeyspace();
         System.out.println("Describe Keyspace: " + ki.getName());
 
         MutationBatch m;

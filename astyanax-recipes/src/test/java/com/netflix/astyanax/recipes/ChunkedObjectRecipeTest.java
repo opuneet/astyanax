@@ -11,14 +11,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.ImmutableMap;
-import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.Keyspace;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.ColumnFamily;
 import com.netflix.astyanax.model.ColumnList;
 import com.netflix.astyanax.recipes.storage.CassandraChunkedStorageProvider;
@@ -27,7 +20,7 @@ import com.netflix.astyanax.recipes.storage.ObjectMetadata;
 import com.netflix.astyanax.recipes.storage.ObjectWriteCallback;
 import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.thrift.ThriftFamilyFactory;
-import com.netflix.astyanax.util.SingletonEmbeddedCassandra;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 
 public class ChunkedObjectRecipeTest {
 
@@ -36,72 +29,26 @@ public class ChunkedObjectRecipeTest {
 	public static ColumnFamily<String, String> CF_CHUNK = 
 			ColumnFamily.newColumnFamily("cfchunk", StringSerializer.get(), StringSerializer.get());
 
-	private static final long   CASSANDRA_WAIT_TIME = 3000;
-	
-	private static final String TEST_CLUSTER_NAME  = "cass_sandbox";
-	private static final String TEST_KEYSPACE_NAME = "AstyanaxUnitTests_ChunkRecipe";
-	private static final String SEEDS = "localhost:9160";
-
 	/**
 	 * Interal
 	 */
 	private static Keyspace                  keyspace;
-	private static AstyanaxContext<Keyspace> keyspaceContext;
 
 	@BeforeClass
 	public static void setup() throws Exception {
 
-		SingletonEmbeddedCassandra.getInstance();
-		Thread.sleep(CASSANDRA_WAIT_TIME);
+	    CassandraTestServerProxy.getInstance().startCassServer();
 		createKeyspace();
 	}
 
 	@AfterClass
 	public static void teardown() throws Exception {
-		if (keyspaceContext != null)
-			keyspaceContext.shutdown();
-
-		Thread.sleep(CASSANDRA_WAIT_TIME);
 	}
 
 	public static void createKeyspace() throws Exception {
-		keyspaceContext = new AstyanaxContext.Builder()
-		.forCluster(TEST_CLUSTER_NAME)
-		.forKeyspace(TEST_KEYSPACE_NAME)
-		.withAstyanaxConfiguration(
-				new AstyanaxConfigurationImpl()
-				.setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE)
-				.setConnectionPoolType(ConnectionPoolType.TOKEN_AWARE)
-				.setDiscoveryDelayInSeconds(60000))
-				.withConnectionPoolConfiguration(
-						new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-								+ "_" + TEST_KEYSPACE_NAME)
-						.setSocketTimeout(30000)
-						.setMaxTimeoutWhenExhausted(2000)
-						.setMaxConnsPerHost(20)
-						.setInitConnsPerHost(10)
-						.setSeeds(SEEDS))
-						.withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-						.buildKeyspace(ThriftFamilyFactory.getInstance());
 
-		keyspaceContext.start();
-		keyspace = keyspaceContext.getClient();
-
-		try {
-			keyspace.dropKeyspace();
-		}
-		catch (Exception e) {
-			LOG.info(e.getMessage());
-		}
-
-		keyspace.createKeyspace(ImmutableMap.<String, Object>builder()
-				.put("strategy_options", ImmutableMap.<String, Object>builder()
-						.put("replication_factor", "1")
-						.build())
-						.put("strategy_class",     "SimpleStrategy")
-						.build()
-				);
-
+	    keyspace = 
+	            CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
 
 		keyspace.createColumnFamily(CF_CHUNK,  null);
 	}

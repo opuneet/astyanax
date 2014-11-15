@@ -1,8 +1,6 @@
 package com.netflix.astyanax.recipes;
 
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -21,25 +19,16 @@ import com.google.common.base.Function;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
-import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.ColumnListMutation;
 import com.netflix.astyanax.Keyspace;
 import com.netflix.astyanax.MutationBatch;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
 import com.netflix.astyanax.connectionpool.OperationResult;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
 import com.netflix.astyanax.ddl.KeyspaceDefinition;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.Column;
 import com.netflix.astyanax.model.ColumnFamily;
 import com.netflix.astyanax.model.ColumnList;
 import com.netflix.astyanax.model.ConsistencyLevel;
 import com.netflix.astyanax.model.Row;
-import com.netflix.astyanax.partitioner.Murmur3Partitioner;
-import com.netflix.astyanax.recipes.UUIDStringSupplier;
 import com.netflix.astyanax.recipes.functions.ColumnCounterFunction;
 import com.netflix.astyanax.recipes.functions.RowCopierFunction;
 import com.netflix.astyanax.recipes.functions.RowCounterFunction;
@@ -57,7 +46,7 @@ import com.netflix.astyanax.serializers.LongSerializer;
 import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.serializers.TimeUUIDSerializer;
 import com.netflix.astyanax.thrift.ThriftFamilyFactory;
-import com.netflix.astyanax.util.SingletonEmbeddedCassandra;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 import com.netflix.astyanax.util.TimeUUIDUtils;
 
 public class MiscUnitTest {
@@ -66,12 +55,8 @@ public class MiscUnitTest {
     /**
      * Constants
      */
-    private static final long   CASSANDRA_WAIT_TIME = 3000;
+    //private static final long   CASSANDRA_WAIT_TIME = 3000;
     private static final int    TTL                 = 20;
-    
-    private static final String TEST_CLUSTER_NAME  = "cass_sandbox";
-    private static final String TEST_KEYSPACE_NAME = "AstyanaxUnitTests_MiscRecipes";
-    private static final String SEEDS = "localhost:9160";
     
     private static final int    ALL_ROWS_COUNT = 10000;
     
@@ -80,49 +65,49 @@ public class MiscUnitTest {
      */
     public static ColumnFamily<String, UUID> CF_USER_UNIQUE_UUID = ColumnFamily
             .newColumnFamily(
-                    "UserUniqueUUID", 
+                    "Misc_UserUniqueUUID", 
                     StringSerializer.get(),
                     TimeUUIDSerializer.get());
     
     public static ColumnFamily<String, UUID> CF_EMAIL_UNIQUE_UUID = ColumnFamily
             .newColumnFamily(
-                    "EmailUniqueUUID", 
+                    "Misc_EmailUniqueUUID", 
                     StringSerializer.get(),
                     TimeUUIDSerializer.get());
     
     private static ColumnFamily<String, String> LOCK_CF_LONG   = 
-            ColumnFamily.newColumnFamily("LockCfLong", StringSerializer.get(), StringSerializer.get(), LongSerializer.get());
+            ColumnFamily.newColumnFamily("Misc_LockCfLong", StringSerializer.get(), StringSerializer.get(), LongSerializer.get());
     
     private static ColumnFamily<String, String> LOCK_CF_STRING = 
-            ColumnFamily.newColumnFamily("LockCfString", StringSerializer.get(), StringSerializer.get(), StringSerializer.get());
+            ColumnFamily.newColumnFamily("Misc_LockCfString", StringSerializer.get(), StringSerializer.get(), StringSerializer.get());
     
     private static ColumnFamily<String, String> UNIQUE_CF = ColumnFamily
             .newColumnFamily(
-                    "UniqueCf", 
+                    "Misc_UniqueCf", 
                     StringSerializer.get(), 
                     StringSerializer.get());
 
     public static ColumnFamily<String, String> CF_STANDARD1 = ColumnFamily
             .newColumnFamily(
-                    "Standard1", 
+                    "Misc_Standard1", 
                     StringSerializer.get(),
                     StringSerializer.get());
     
     public static ColumnFamily<String, String> CF_STANDARD1_COPY = ColumnFamily
             .newColumnFamily(
-                    "Standard1_COPY", 
+                    "Misc_Standard1_COPY", 
                     StringSerializer.get(),
                     StringSerializer.get());
     
     public static ColumnFamily<Integer, Integer> CF_ALL_ROWS = ColumnFamily
             .newColumnFamily(
-                    "AllRowsMiscUnitTest", 
+                    "Misc_AllRowsMiscUnitTest", 
                     IntegerSerializer.get(),
                     IntegerSerializer.get());
 
     public static ColumnFamily<Integer, Integer> CF_ALL_ROWS_COPY = ColumnFamily
             .newColumnFamily(
-                    "AllRowsMiscUnitTestCopy", 
+                    "Misc_AllRowsMiscUnitTestCopy", 
                     IntegerSerializer.get(),
                     IntegerSerializer.get());
 
@@ -130,67 +115,22 @@ public class MiscUnitTest {
      * Interal
      */
     private static Keyspace                  keyspace;
-    private static AstyanaxContext<Keyspace> keyspaceContext;
 
     @BeforeClass
     public static void setup() throws Exception {
-        System.out.println("TESTING THRIFT KEYSPACE");
-
-        SingletonEmbeddedCassandra.getInstance();
-        
-        Thread.sleep(CASSANDRA_WAIT_TIME);
-        
+        CassandraTestServerProxy.getInstance().startCassServer();
         createKeyspace();
     }
 
     @AfterClass
     public static void teardown() throws Exception {
-        if (keyspaceContext != null)
-            keyspaceContext.shutdown();
-        
-        Thread.sleep(CASSANDRA_WAIT_TIME);
     }
 
     public static void createKeyspace() throws Exception {
-        keyspaceContext = new AstyanaxContext.Builder()
-                .forCluster(TEST_CLUSTER_NAME)
-                .forKeyspace(TEST_KEYSPACE_NAME)
-                .withAstyanaxConfiguration(
-                        new AstyanaxConfigurationImpl()
-                                .setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE)
-                                .setConnectionPoolType(ConnectionPoolType.TOKEN_AWARE)
-                                .setDiscoveryDelayInSeconds(60000))
-                .withConnectionPoolConfiguration(
-                        new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-                                + "_" + TEST_KEYSPACE_NAME)
-                                .setSocketTimeout(30000)
-                                .setMaxTimeoutWhenExhausted(2000)
-                                .setMaxConnsPerHost(20)
-                                .setInitConnsPerHost(10)
-                                .setSeeds(SEEDS))
-                .withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-                .buildKeyspace(ThriftFamilyFactory.getInstance());
 
-        keyspaceContext.start();
+        keyspace = 
+                CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
         
-        keyspace = keyspaceContext.getEntity();
-        
-        try {
-            keyspace.dropKeyspace();
-        }
-        catch (Exception e) {
-            LOG.info(e.getMessage());
-        }
-        
-        keyspace.createKeyspace(ImmutableMap.<String, Object>builder()
-                .put("strategy_options", ImmutableMap.<String, Object>builder()
-                        .put("replication_factor", "1")
-                        .build())
-                .put("strategy_class",     "SimpleStrategy")
-                .build()
-                );
-        
-
         keyspace.createColumnFamily(CF_USER_UNIQUE_UUID,  null);
         keyspace.createColumnFamily(CF_EMAIL_UNIQUE_UUID, null);
         keyspace.createColumnFamily(CF_ALL_ROWS, null);
@@ -225,7 +165,7 @@ public class MiscUnitTest {
         keyspace.createColumnFamily(UNIQUE_CF, null);
         keyspace.createColumnFamily(CF_STANDARD1_COPY, null);
         
-        KeyspaceDefinition ki = keyspaceContext.getEntity().describeKeyspace();
+        KeyspaceDefinition ki = keyspace.describeKeyspace();
         System.out.println("Describe Keyspace: " + ki.getName());
         
         try {

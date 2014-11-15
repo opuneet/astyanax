@@ -15,18 +15,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Function;
-import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.Cluster;
 import com.netflix.astyanax.Keyspace;
 import com.netflix.astyanax.MutationBatch;
 import com.netflix.astyanax.Serializer;
 import com.netflix.astyanax.annotations.Component;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
 import com.netflix.astyanax.connectionpool.exceptions.ConnectionException;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
 import com.netflix.astyanax.ddl.KeyspaceDefinition;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.Column;
 import com.netflix.astyanax.model.ColumnFamily;
 import com.netflix.astyanax.model.Row;
@@ -35,14 +30,14 @@ import com.netflix.astyanax.serializers.AnnotatedCompositeSerializer;
 import com.netflix.astyanax.serializers.LongSerializer;
 import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.thrift.ThriftFamilyFactory;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 
 public class ReverseIndexQueryTest {
 
     private static Logger LOG = LoggerFactory.getLogger(ReverseIndexQueryTest.class);
 
-    private static AstyanaxContext<Cluster> clusterContext;
+    private static Cluster cluster;
 
-    private static final String TEST_CLUSTER_NAME = "TestCluster";
     private static final String TEST_KEYSPACE_NAME = "ReverseIndexTest";
     private static final String TEST_DATA_CF = "Data";
     private static final String TEST_INDEX_CF = "Index";
@@ -78,29 +73,11 @@ public class ReverseIndexQueryTest {
 
     @BeforeClass
     public static void setup() throws Exception {
-        clusterContext = new AstyanaxContext.Builder()
-                .forCluster(TEST_CLUSTER_NAME)
-                .withAstyanaxConfiguration(
-                        new AstyanaxConfigurationImpl()
-                                .setDiscoveryType(NodeDiscoveryType.NONE))
-                .withConnectionPoolConfiguration(
-                        new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME)
-                                .setMaxConnsPerHost(1).setSeeds(SEEDS))
-                .withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-                .buildCluster(ThriftFamilyFactory.getInstance());
-
-        clusterContext.start();
-
+        
+        cluster = CassandraTestServerProxy.getInstance().getOrCreateCluster(ThriftFamilyFactory.getInstance());
+        
         if (TEST_INIT_KEYSPACE) {
-            Cluster cluster = clusterContext.getEntity();
-            try {
-                LOG.info("Dropping keyspace: " + TEST_KEYSPACE_NAME);
-                cluster.dropKeyspace(TEST_KEYSPACE_NAME);
-                Thread.sleep(10000);
-            } catch (ConnectionException e) {
-                LOG.warn(e.getMessage());
-            }
-
+            
             Map<String, String> stratOptions = new HashMap<String, String>();
             stratOptions.put("replication_factor", "3");
 
@@ -109,9 +86,12 @@ public class ReverseIndexQueryTest {
 
                 KeyspaceDefinition ksDef = cluster.makeKeyspaceDefinition();
 
+                String strategyClass = CassandraTestServerProxy.getInstance().useRemoteCassandra() ? 
+                        "NetworkTopologyStrategy" : "SimpleStrategy";
+                
                 ksDef.setName(TEST_KEYSPACE_NAME)
                         .setStrategyOptions(stratOptions)
-                        .setStrategyClass("SimpleStrategy")
+                        .setStrategyClass(strategyClass)
                         .addColumnFamily(
                                 cluster.makeColumnFamilyDefinition()
                                         .setName(CF_DATA.getName())
@@ -136,15 +116,14 @@ public class ReverseIndexQueryTest {
 
     @AfterClass
     public static void teardown() {
-        if (clusterContext != null)
-            clusterContext.shutdown();
+//        if (clusterContext != null)
+//            clusterContext.shutdown();
     }
 
     public static void populateKeyspace() throws Exception {
         LOG.info("Ppoulating keyspace: " + TEST_KEYSPACE_NAME);
 
-        Keyspace keyspace = clusterContext.getEntity().getKeyspace(
-                TEST_KEYSPACE_NAME);
+        Keyspace keyspace = cluster.getKeyspace(TEST_KEYSPACE_NAME);
 
         try {
             // CF_Users :
@@ -181,7 +160,7 @@ public class ReverseIndexQueryTest {
         LOG.info("Starting");
         final AtomicLong counter = new AtomicLong();
 
-        Keyspace keyspace = clusterContext.getEntity().getKeyspace(TEST_KEYSPACE_NAME);
+        Keyspace keyspace = cluster.getKeyspace(TEST_KEYSPACE_NAME);
         ReverseIndexQuery
                 .newQuery(keyspace, CF_DATA, CF_INDEX.getName(),
                         LongSerializer.get())

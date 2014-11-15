@@ -26,6 +26,7 @@ import com.netflix.astyanax.serializers.LongSerializer;
 import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.test.EmbeddedCassandra;
 import com.netflix.astyanax.thrift.ThriftFamilyFactory;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 
 /**
  * Ignore for now because of issues with running embedded cassandra from multiple unit tests
@@ -41,75 +42,28 @@ public class LockRecipeTest {
             ColumnFamily.newColumnFamily("LockCfString", StringSerializer.get(), StringSerializer.get(), StringSerializer.get());
     
     private static final int    TTL                 = 20;
-    private static final int    TIMEOUT             = 10;
-    private static final String SEEDS               = "localhost:9160";
-    private static final long   CASSANDRA_WAIT_TIME = 3000;
+//    private static final int    TIMEOUT             = 10;
+//    private static final String SEEDS               = "localhost:9160";
+//    private static final long   CASSANDRA_WAIT_TIME = 3000;
     
     private static Keyspace                  keyspace;
-    private static AstyanaxContext<Keyspace> keyspaceContext;
-    private static EmbeddedCassandra         cassandra;
-    
-    private static String TEST_CLUSTER_NAME  = "cass_sandbox";
-    private static String TEST_KEYSPACE_NAME = "LockUnitTest";
     
     @BeforeClass
     public static void setup() throws Exception {
         System.out.println("TESTING THRIFT KEYSPACE");
 
-        cassandra = new EmbeddedCassandra();
-        cassandra.start();
-        
-        Thread.sleep(CASSANDRA_WAIT_TIME);
-        
+        CassandraTestServerProxy.getInstance().startCassServer();
         createKeyspace();
     }
 
     @AfterClass
     public static void teardown() {
-        if (keyspaceContext != null)
-            keyspaceContext.shutdown();
-        
-        if (cassandra != null)
-            cassandra.stop();
     }
 
     public static void createKeyspace() throws Exception {
-        keyspaceContext = new AstyanaxContext.Builder()
-                .forCluster(TEST_CLUSTER_NAME)
-                .forKeyspace(TEST_KEYSPACE_NAME)
-                .withAstyanaxConfiguration(
-                        new AstyanaxConfigurationImpl()
-                                .setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE)
-                                .setConnectionPoolType(ConnectionPoolType.TOKEN_AWARE))
-                .withConnectionPoolConfiguration(
-                        new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-                                + "_" + TEST_KEYSPACE_NAME)
-                                .setSocketTimeout(30000)
-                                .setMaxTimeoutWhenExhausted(2000)
-                                .setMaxConnsPerHost(10)
-                                .setInitConnsPerHost(10)
-                                .setSeeds(SEEDS))
-                .withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-                .buildKeyspace(ThriftFamilyFactory.getInstance());
 
-        keyspaceContext.start();
-        
-        keyspace = keyspaceContext.getEntity();
-        
-        try {
-            keyspace.dropKeyspace();
-        }
-        catch (Exception e) {
-            
-        }
-        
-        keyspace.createKeyspace(ImmutableMap.<String, Object>builder()
-                .put("strategy_options", ImmutableMap.<String, Object>builder()
-                        .put("replication_factor", "1")
-                        .build())
-                .put("strategy_class",     "SimpleStrategy")
-                .build()
-                );
+        keyspace = 
+                CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
         
         keyspace.createColumnFamily(LOCK_CF_LONG, ImmutableMap.<String, Object>builder()
                 .put("default_validation_class", "LongType")
@@ -124,9 +78,8 @@ public class LockRecipeTest {
                 .build());
         ;
         
-        KeyspaceDefinition ki = keyspaceContext.getEntity().describeKeyspace();
+        KeyspaceDefinition ki = keyspace.describeKeyspace();
         System.out.println("Describe Keyspace: " + ki.getName());
-
     }
     
     

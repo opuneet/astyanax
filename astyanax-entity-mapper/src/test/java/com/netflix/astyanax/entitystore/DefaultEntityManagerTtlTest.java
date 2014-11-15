@@ -10,28 +10,16 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import com.google.common.collect.ImmutableMap;
-import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.Keyspace;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.ColumnFamily;
 import com.netflix.astyanax.model.ColumnList;
 import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.thrift.ThriftFamilyFactory;
-import com.netflix.astyanax.util.SingletonEmbeddedCassandra;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 
 public class DefaultEntityManagerTtlTest {
 	
 	private static Keyspace                  keyspace;
-	private static AstyanaxContext<Keyspace> keyspaceContext;
-
-	private static String TEST_CLUSTER_NAME  = "junit_cass_sandbox";
-	private static String TEST_KEYSPACE_NAME = "EntityPersisterTestKeyspace";
-	private static final String SEEDS = "localhost:9160";
 
 	public static ColumnFamily<String, String> CF_SAMPLE_ENTITY = ColumnFamily.newColumnFamily(
 			"SampleEntityColumnFamily", 
@@ -46,10 +34,7 @@ public class DefaultEntityManagerTtlTest {
 	@BeforeClass
 	public static void setup() throws Exception {
 
-		SingletonEmbeddedCassandra.getInstance();
-
-		Thread.sleep(1000 * 3);
-
+	    CassandraTestServerProxy.getInstance().startCassServer();
 		createKeyspace();
 
 		Thread.sleep(1000 * 3);
@@ -57,50 +42,21 @@ public class DefaultEntityManagerTtlTest {
 
 	@AfterClass
 	public static void teardown() throws Exception {
-		if (keyspaceContext != null)
-			keyspaceContext.shutdown();
-
-		Thread.sleep(1000 * 10);
 	}
 
 	private static void createKeyspace() throws Exception {
-		keyspaceContext = new AstyanaxContext.Builder()
-		.forCluster(TEST_CLUSTER_NAME)
-		.forKeyspace(TEST_KEYSPACE_NAME)
-		.withAstyanaxConfiguration(
-				new AstyanaxConfigurationImpl()
-				.setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE)
-				.setConnectionPoolType(ConnectionPoolType.ROUND_ROBIN))
-				.withConnectionPoolConfiguration(
-						new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-								+ "_" + TEST_KEYSPACE_NAME)
-						.setSocketTimeout(30000)
-						.setMaxTimeoutWhenExhausted(2000)
-						.setMaxConnsPerHost(20)
-						.setInitConnsPerHost(10)
-						.setSeeds(SEEDS))
-						.withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-						.buildKeyspace(ThriftFamilyFactory.getInstance());
 
-		keyspaceContext.start();
-
-		keyspace = keyspaceContext.getEntity();
-
-		try {
-			keyspace.dropKeyspace();
-		}
-		catch (Exception e) {
-			e.printStackTrace();
-		}
-
-		keyspace.createKeyspace(ImmutableMap.<String, Object>builder()
-				.put("strategy_options", ImmutableMap.<String, Object>builder()
-						.put("replication_factor", "1")
-						.build())
-						.put("strategy_class",     "SimpleStrategy")
-						.build()
-				);
-
+	    keyspace = 
+                CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
+	    
+        try { 
+            keyspace.dropColumnFamily(CF_SAMPLE_ENTITY);
+        } catch (Exception e) {
+        }
+        try { 
+            keyspace.dropColumnFamily(CF_SIMPLE_ENTITY);
+        } catch (Exception e) {
+        }
 		keyspace.createColumnFamily(CF_SAMPLE_ENTITY, null);
 		keyspace.createColumnFamily(CF_SIMPLE_ENTITY, null);
 	}

@@ -2,8 +2,8 @@ package com.netflix.astyanax.thrift;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.UUID;
 import java.util.Map.Entry;
+import java.util.UUID;
 
 import junit.framework.Assert;
 
@@ -14,18 +14,11 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.ImmutableMap;
-import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.Keyspace;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
 import com.netflix.astyanax.connectionpool.OperationResult;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
 import com.netflix.astyanax.cql.CqlSchema;
 import com.netflix.astyanax.cql.CqlStatementResult;
 import com.netflix.astyanax.ddl.KeyspaceDefinition;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.Column;
 import com.netflix.astyanax.model.ColumnFamily;
 import com.netflix.astyanax.model.ColumnList;
@@ -36,19 +29,13 @@ import com.netflix.astyanax.serializers.IntegerSerializer;
 import com.netflix.astyanax.serializers.MapSerializer;
 import com.netflix.astyanax.serializers.StringSerializer;
 import com.netflix.astyanax.serializers.UUIDSerializer;
-import com.netflix.astyanax.util.SingletonEmbeddedCassandra;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 
 public class CqlTest {
 
     private static Logger Log = LoggerFactory.getLogger(CqlTest.class);
 
     private static Keyspace keyspace;
-    private static AstyanaxContext<Keyspace> keyspaceContext;
-
-    private static String TEST_CLUSTER_NAME = "cass_sandbox";
-    private static String TEST_KEYSPACE_NAME = "CqlTest";
-
-    private static final String SEEDS = "localhost:9160";
 
     private static final long CASSANDRA_WAIT_TIME = 1000;
     static ColumnFamily<Integer, String> CQL3_CF = ColumnFamily
@@ -62,63 +49,17 @@ public class CqlTest {
 
     @BeforeClass
     public static void setup() throws Exception {
-        SingletonEmbeddedCassandra.getInstance();
-
-        Thread.sleep(CASSANDRA_WAIT_TIME);
-
+        CassandraTestServerProxy.getInstance().startCassServer();
         createKeyspace();
     }
 
     @AfterClass
     public static void teardown() throws Exception {
-        if (keyspaceContext != null)
-            keyspaceContext.shutdown();
-
-        Thread.sleep(CASSANDRA_WAIT_TIME);
     }
 
     public static void createKeyspace() throws Exception {
-        keyspaceContext = new AstyanaxContext.Builder()
-                .forCluster(TEST_CLUSTER_NAME)
-                .forKeyspace(TEST_KEYSPACE_NAME)
-                .withAstyanaxConfiguration(
-                        new AstyanaxConfigurationImpl()
-                                .setDiscoveryType(
-                                        NodeDiscoveryType.RING_DESCRIBE)
-                                .setConnectionPoolType(
-                                        ConnectionPoolType.TOKEN_AWARE)
-                                .setDiscoveryDelayInSeconds(60000)
-                                .setTargetCassandraVersion("1.2")
-                                .setCqlVersion("3.0.0"))
-                .withConnectionPoolConfiguration(
-                        new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-                                + "_" + TEST_KEYSPACE_NAME)
-                                .setSocketTimeout(30000)
-                                .setMaxTimeoutWhenExhausted(2000)
-                                .setMaxConnsPerHost(10).setInitConnsPerHost(10)
-                                .setSeeds(SEEDS))
-                .withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-                .buildKeyspace(ThriftFamilyFactory.getInstance());
-
-        keyspaceContext.start();
-
-        keyspace = keyspaceContext.getEntity();
-
-        try {
-            keyspace.dropKeyspace();
-            Thread.sleep(CASSANDRA_WAIT_TIME);
-        } catch (Exception e) {
-            Log.info("Error dropping keyspace " + e.getMessage());
-        }
-
-        keyspace.createKeyspace(ImmutableMap
-                .<String, Object> builder()
-                .put("strategy_options",
-                        ImmutableMap.<String, Object> builder()
-                                .put("replication_factor", "1").build())
-                .put("strategy_class", "SimpleStrategy").build());
-
-        Thread.sleep(CASSANDRA_WAIT_TIME);
+        
+        keyspace = CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
 
         OperationResult<CqlStatementResult> result;
 
@@ -136,9 +77,8 @@ public class CqlTest {
 
         Thread.sleep(CASSANDRA_WAIT_TIME);
 
-        KeyspaceDefinition ki = keyspaceContext.getEntity().describeKeyspace();
+        KeyspaceDefinition ki = keyspace.describeKeyspace();
         Log.info("Describe Keyspace: " + ki.getName());
-
     }
 
     @Test
@@ -231,7 +171,7 @@ public class CqlTest {
 
     }
 
-    @Test
+   @Test
     public void testCollections() throws Exception {
         OperationResult<CqlStatementResult> result;
         result = keyspace
@@ -345,5 +285,21 @@ public class CqlTest {
             Log.info("*************************************");
         }
         Assert.assertEquals(1, rows.size());
+    }
+    
+    private static void dropColumnFamiles(Keyspace keyspace, String ... cfNames) {
+        for (String cfName : cfNames) {
+            try { 
+                System.out.println("DROPPING CF: " + cfName);
+                keyspace.dropColumnFamily(cfName);
+            } catch (Exception e) {
+            } finally {
+                try { 
+                    Thread.sleep(10*1000);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }
     }
 }

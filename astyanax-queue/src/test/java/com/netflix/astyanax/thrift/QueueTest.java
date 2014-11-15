@@ -1,13 +1,20 @@
 package com.netflix.astyanax.thrift;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 import junit.framework.Assert;
 
@@ -15,22 +22,17 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Function;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.netflix.astyanax.AstyanaxContext;
 import com.netflix.astyanax.Keyspace;
-import com.netflix.astyanax.connectionpool.NodeDiscoveryType;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolConfigurationImpl;
-import com.netflix.astyanax.connectionpool.impl.ConnectionPoolType;
-import com.netflix.astyanax.connectionpool.impl.CountingConnectionPoolMonitor;
-import com.netflix.astyanax.impl.AstyanaxConfigurationImpl;
 import com.netflix.astyanax.model.ConsistencyLevel;
 import com.netflix.astyanax.recipes.locks.BusyLockException;
 import com.netflix.astyanax.recipes.queue.CountingQueueStats;
@@ -48,26 +50,14 @@ import com.netflix.astyanax.recipes.queue.ShardLockManager;
 import com.netflix.astyanax.recipes.queue.ShardedDistributedMessageQueue;
 import com.netflix.astyanax.recipes.queue.triggers.RepeatingTrigger;
 import com.netflix.astyanax.recipes.queue.triggers.RunOnceTrigger;
-import com.netflix.astyanax.util.SingletonEmbeddedCassandra;
-import java.util.Arrays;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized.Parameters;
-import static org.junit.Assert.*;
+import com.netflix.astyanax.util.CassandraTestServerProxy;
 
 @RunWith(value = Parameterized.class)
 public class QueueTest {
 
     private static Logger LOG = LoggerFactory.getLogger(QueueTest.class);
     private static Keyspace keyspace;
-    private static AstyanaxContext<Keyspace> keyspaceContext;
-    private static String TEST_CLUSTER_NAME = "cass_sandbox";
-    private static String TEST_KEYSPACE_NAME = "AstyanaxUnitTests";
     private static String SCHEDULER_NAME_CF_NAME = "SchedulerQueue";
-    private static final String SEEDS = "localhost:9160";
-    private static final long CASSANDRA_WAIT_TIME = 3000;
     private static final int TTL = 20;
     private static final int TIMEOUT = 10;
     private static final ConsistencyLevel CONSISTENCY_LEVEL = ConsistencyLevel.CL_ONE;
@@ -78,10 +68,7 @@ public class QueueTest {
     public static void setup() throws Exception {
         LOG.info("TESTING THRIFT KEYSPACE");
 
-        SingletonEmbeddedCassandra.getInstance();
-
-        Thread.sleep(CASSANDRA_WAIT_TIME);
-
+        CassandraTestServerProxy.getInstance().startCassServer();
         createKeyspace();
     }
 
@@ -99,41 +86,8 @@ public class QueueTest {
     }
 
     public static void createKeyspace() throws Exception {
-        keyspaceContext = new AstyanaxContext.Builder()
-                .forCluster(TEST_CLUSTER_NAME)
-                .forKeyspace(TEST_KEYSPACE_NAME)
-                .withAstyanaxConfiguration(
-                new AstyanaxConfigurationImpl()
-                .setDiscoveryType(NodeDiscoveryType.RING_DESCRIBE)
-                .setConnectionPoolType(ConnectionPoolType.TOKEN_AWARE)
-                .setDiscoveryDelayInSeconds(60000))
-                .withConnectionPoolConfiguration(
-                new ConnectionPoolConfigurationImpl(TEST_CLUSTER_NAME
-                + "_" + TEST_KEYSPACE_NAME)
-                .setSocketTimeout(30000)
-                .setMaxTimeoutWhenExhausted(2000)
-                .setMaxConnsPerHost(20)
-                .setInitConnsPerHost(10)
-                .setSeeds(SEEDS))
-                .withConnectionPoolMonitor(new CountingConnectionPoolMonitor())
-                .buildKeyspace(ThriftFamilyFactory.getInstance());
-
-        keyspaceContext.start();
-
-        keyspace = keyspaceContext.getEntity();
-
-        try {
-            keyspace.dropKeyspace();
-        } catch (Exception e) {
-            LOG.info(e.getMessage());
-        }
-
-        keyspace.createKeyspace(ImmutableMap.<String, Object>builder()
-                .put("strategy_options", ImmutableMap.<String, Object>builder()
-                .put("replication_factor", "1")
-                .build())
-                .put("strategy_class", "SimpleStrategy")
-                .build());
+        
+        keyspace = CassandraTestServerProxy.getInstance().getOrCreateKeyspace(ThriftFamilyFactory.getInstance());
 
         final CountingQueueStats stats = new CountingQueueStats();
 
@@ -154,11 +108,6 @@ public class QueueTest {
 
     @AfterClass
     public static void teardown() throws Exception {
-        if (keyspaceContext != null) {
-            keyspaceContext.shutdown();
-        }
-
-        Thread.sleep(CASSANDRA_WAIT_TIME);
     }
 
     @Test
